@@ -9,7 +9,7 @@ from duckduckgo_search import DDGS
 from supabase import create_client, Client
 
 # --- APAGAR AVISOS MOLESTOS DE LA CONSOLA ---
-warnings.filterwarnings("ignore", category=RuntimeWarning)
+warnings.filterwarnings("ignore")
 
 # --- 1. CONEXIONES Y LLAVES ---
 url_db = os.environ.get("SUPABASE_URL")
@@ -28,7 +28,6 @@ def extraer_contexto(url):
     if not url or url == "null": return "Sin información"
     if not url.startswith('http'): url = 'https://' + url
     try:
-        # Timeout de 3 segundos. Si la web es lenta, la ignoramos para no perder 12 minutos.
         res = requests.get(url, headers=headers, timeout=3)
         soup = BeautifulSoup(res.text, 'html.parser')
         for s in soup(["script", "style"]): s.extract()
@@ -56,7 +55,6 @@ def guardar(empresa, email, origen, cargo="Desconocido", tel=None, web=None):
         print(f"✅ [CAZADO] {empresa} | {email_limpio} | Vía: {origen}")
     except Exception as e:
         error_msg = str(e).lower()
-        # Si el error es porque el email ya existe, nos callamos. Si es otro error, lo gritamos.
         if "duplicate" not in error_msg and "unique" not in error_msg:
             print(f"❌ Error en Supabase al guardar {email_limpio}: {e}")
 
@@ -72,7 +70,6 @@ def buscar_correos_por_web(dominio, nombre_empresa, origen_base, tel=None, web_f
                 encontrado = True
         except: pass
     
-    # Scraper a fuerza bruta si Hunter no sabe el correo
     if not encontrado and web_full:
         try:
             html = requests.get(web_full, headers=headers, timeout=3).text
@@ -140,7 +137,6 @@ def motor_google_dorking(ciudad):
     print(f"🔍 Arrancando Motor 4 (Google Dorking) para {ciudad}...")
     try:
         query = f'inurl:contacto "transitario" OR "aduanas" {ciudad}'
-        # Bajamos el tiempo de espera entre búsquedas para ir a fondo
         for web in search(query, num_results=2, sleep_interval=1):
             if 'paginasamarillas' in web or 'linkedin' in web: continue
             dominio = web.split('//')[-1].split('/')[0].replace('www.', '')
