@@ -5,13 +5,11 @@ import re
 import warnings
 from bs4 import BeautifulSoup
 from googlesearch import search
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from supabase import create_client, Client
 
-# --- APAGAR AVISOS MOLESTOS DE LA CONSOLA ---
 warnings.filterwarnings("ignore")
 
-# --- 1. CONEXIONES Y LLAVES ---
 url_db = os.environ.get("SUPABASE_URL")
 key_db = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(url_db, key_db) if url_db and key_db else None
@@ -23,7 +21,6 @@ SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 ciudades = ["Barcelona", "Madrid", "Valencia", "Algeciras", "Bilbao", "Vigo", "Zaragoza"]
 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-# --- 2. INTELIGENCIA (Lector de Contexto Ultrarrápido) ---
 def extraer_contexto(url):
     if not url or url == "null": return "Sin información"
     if not url.startswith('http'): url = 'https://' + url
@@ -35,7 +32,6 @@ def extraer_contexto(url):
     except:
         return "No se pudo leer la web"
 
-# --- 3. ALMACÉN (Con chivato de errores) ---
 def guardar(empresa, email, origen, cargo="Desconocido", tel=None, web=None):
     if not supabase or not email or "null" in email.lower(): return
     if any(ext in email.lower() for ext in ['.png', '.jpg', 'wix', 'example', 'sentry']): return
@@ -58,7 +54,6 @@ def guardar(empresa, email, origen, cargo="Desconocido", tel=None, web=None):
         if "duplicate" not in error_msg and "unique" not in error_msg:
             print(f"❌ Error en Supabase al guardar {email_limpio}: {e}")
 
-# --- 4. MOTOR DE CORREOS (Hunter + Scraper) ---
 def buscar_correos_por_web(dominio, nombre_empresa, origen_base, tel=None, web_full=None):
     encontrado = False
     if HUNTER_KEY:
@@ -78,7 +73,6 @@ def buscar_correos_por_web(dominio, nombre_empresa, origen_base, tel=None, web_f
                 guardar(nombre_empresa, e, f"Web Scraper ({origen_base})", "Web Extracted", tel, web_full)
         except: pass
 
-# --- 5. MOTOR 1: APOLLO (API - Directivos VIP) ---
 def motor_apollo():
     if not APOLLO_KEY: return
     print("🚀 Arrancando Motor 1: Apollo B2B...")
@@ -102,7 +96,6 @@ def motor_apollo():
             guardar(org.get('name', 'Empresa Desconocida'), p.get('email'), "Apollo", p.get('title', 'Cargo Desconocido'), web=org.get('website_url'))
     except Exception as e: print(f"❌ Error crítico en Apollo: {e}")
 
-# --- 6. MOTOR 2: SERPAPI (API - Google Maps) ---
 def motor_serpapi(ciudad):
     if not SERPAPI_KEY: return
     print(f"🌍 Arrancando Motor 2 (Maps) para {ciudad}...")
@@ -120,7 +113,6 @@ def motor_serpapi(ciudad):
                 buscar_correos_por_web(dominio, lugar.get('title'), f"Maps {ciudad}", lugar.get('phone'), web)
     except Exception as e: print(f"❌ Error crítico en SerpApi: {e}")
 
-# --- 7. MOTOR 3: DUCKDUCKGO (Fuerza Bruta Ligera) ---
 def motor_duckduckgo(ciudad):
     print(f"🦆 Arrancando Motor 3 (DuckDuckGo) para {ciudad}...")
     try:
@@ -132,7 +124,6 @@ def motor_duckduckgo(ciudad):
                 buscar_correos_por_web(dominio, r.get('title', 'Empresa DDG'), f"DDG {ciudad}", web_full=web)
     except: pass
 
-# --- 8. MOTOR 4: GOOGLE DORKING (Rescate) ---
 def motor_google_dorking(ciudad):
     print(f"🔍 Arrancando Motor 4 (Google Dorking) para {ciudad}...")
     try:
@@ -143,7 +134,6 @@ def motor_google_dorking(ciudad):
             buscar_correos_por_web(dominio, "Empresa Búsqueda", f"Google Dorking {ciudad}", web_full=web)
     except: pass
 
-# --- EJECUCIÓN MAESTRA ---
 print("⚙️ MEGA-MÁQUINA B2B INICIADA (MODO ALTA VELOCIDAD Y DEBUG) ⚙️")
 motor_apollo()
 for ciudad in ciudades:
