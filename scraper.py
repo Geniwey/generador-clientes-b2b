@@ -3,40 +3,38 @@ import time
 import requests
 import re
 from bs4 import BeautifulSoup
+from googlesearch import search
+from duckduckgo_search import DDGS
 from supabase import create_client, Client
 
-# --- 1. CONEXIONES Y LLAVES SECRETAS ---
-supabase: Client = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
+# --- 1. CONEXIONES Y LLAVES ---
+url_db = os.environ.get("SUPABASE_URL")
+key_db = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(url_db, key_db) if url_db and key_db else None
+
 APOLLO_KEY = os.environ.get("APOLLO_KEY")
 HUNTER_KEY = os.environ.get("HUNTER_KEY")
-GOOGLE_MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY")
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 
-ciudades_españa = ["Barcelona", "Madrid", "Valencia", "Algeciras", "Bilbao", "Vigo", "Zaragoza"]
-headers_navegador = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+ciudades = ["Barcelona", "Madrid", "Valencia", "Algeciras", "Bilbao", "Vigo", "Zaragoza"]
+headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-# --- 2. EL LECTOR DE CONTEXTO (Para la IA) ---
-def extraer_contexto_web(url):
-    """Visita la web de la empresa y lee a qué se dedican para hiper-personalizar el email."""
-    if not url or url == "null": return "Sin información web"
+# --- 2. INTELIGENCIA (Lector de Contexto) ---
+def extraer_contexto(url):
+    if not url or url == "null": return "Sin información"
     if not url.startswith('http'): url = 'https://' + url
-    
     try:
-        res = requests.get(url, headers=headers_navegador, timeout=8)
+        res = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(res.text, 'html.parser')
-        # Borramos código basura para dejar solo texto legible
-        for script in soup(["script", "style"]): script.extract()
-        texto_puro = soup.get_text(separator=' ', strip=True)
-        # Nos quedamos con los primeros 600 caracteres (suficiente para que la IA entienda el negocio)
-        return texto_puro[:600]
+        for s in soup(["script", "style"]): s.extract()
+        return soup.get_text(separator=' ', strip=True)[:500]
     except:
-        return "No se pudo analizar la web"
+        return "No se pudo leer la web"
 
-# --- 3. GUARDADO INTELIGENTE ---
-def guardar_prospecto(empresa, email, origen, cargo="Desconocido", telefono=None, web=None):
-    if not email or "null" in email.lower(): return
-    if any(ext in email.lower() for ext in ['.png', '.jpg', 'sentry', 'wix']): return
-    
-    contexto = extraer_contexto_web(web)
+# --- 3. ALMACÉN ---
+def guardar(empresa, email, origen, cargo="Desconocido", tel=None, web=None):
+    if not supabase or not email or "null" in email.lower(): return
+    if any(ext in email.lower() for ext in ['.png', '.jpg', 'wix', 'example', 'sentry']): return
     
     try:
         supabase.table("prospectos").insert({
@@ -45,82 +43,96 @@ def guardar_prospecto(empresa, email, origen, cargo="Desconocido", telefono=None
             "origen": origen,
             "estado": "PENDIENTE",
             "cargo_contacto": cargo,
-            "telefono": telefono,
-            "contexto_empresa": contexto
+            "telefono": tel,
+            "contexto_empresa": extraer_contexto(web)
         }).execute()
-        print(f"✅ [GUARDADO] {empresa} | {cargo} | {email}")
+        print(f"✅ [CAZADO] {empresa} | {email.lower()} | Vía: {origen}")
     except:
         pass # Ignora duplicados automáticamente
 
-# --- 4. MOTOR 1: APOLLO (CEOs y Directores) ---
-def raspar_apollo():
+# --- 4. MOTOR DE CORREOS (Hunter + Scraper) ---
+def buscar_correos_por_web(dominio, nombre_empresa, origen_base, tel=None, web_full=None):
+    encontrado = False
+    if HUNTER_KEY:
+        try:
+            url_h = f"https://api.hunter.io/v2/domain-search?domain={dominio}&api_key={HUNTER_KEY}"
+            correos = requests.get(url_h).json().get('data', {}).get('emails', [])
+            for c in correos:
+                guardar(nombre_empresa, c.get('value'), f"Hunter ({origen_base})", c.get('position', 'Staff'), tel, web_full)
+                encontrado = True
+        except: pass
+    
+    # Si Hunter falla o no tiene datos, entra el Scraper a fuerza bruta
+    if not encontrado and web_full:
+        try:
+            html = requests.get(web_full, headers=headers, timeout=5).text
+            emails = set(re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+", html))
+            for e in emails:
+                guardar(nombre_empresa, e, f"Web Scraper ({origen_base})", "Web Extracted", tel, web_full)
+        except: pass
+
+# --- 5. MOTOR 1: APOLLO (API - Directivos VIP) ---
+def motor_apollo():
     if not APOLLO_KEY: return
     print("🚀 Arrancando Motor 1: Apollo B2B...")
-    url = "https://api.apollo.io/v1/mixed_people/search"
-    data = {
-        "api_key": APOLLO_KEY,
-        "q_keywords": "transitario aduanas freight forwarder logistica",
-        "person_titles": ["Operations", "Operaciones", "CEO", "Director", "Gerente", "Aduanas"],
-        "person_locations": ["Spain"],
-        "page": 1 
-    }
     try:
+        url = "https://api.apollo.io/v1/mixed_people/search"
+        data = {
+            "api_key": APOLLO_KEY,
+            "q_keywords": "transitario aduanas freight forwarder",
+            "person_titles": ["Operations", "Operaciones", "CEO", "Director", "Aduanas"],
+            "person_locations": ["Spain"],
+            "page": 1 
+        }
         req = requests.post(url, headers={"Content-Type": "application/json"}, json=data)
-        for persona in req.json().get('people', []):
-            org = persona.get('organization', {})
-            guardar_prospecto(
-                empresa=org.get('name', 'Empresa Desconocida'),
-                email=persona.get('email'),
-                origen="Apollo",
-                cargo=persona.get('title', 'Cargo Desconocido'),
-                web=org.get('website_url')
-            )
-    except Exception as e:
-        print(f"Error Apollo: {e}")
+        for p in req.json().get('people', []):
+            org = p.get('organization', {})
+            guardar(org.get('name', 'Empresa Desconocida'), p.get('email'), "Apollo", p.get('title', 'Cargo Desconocido'), web=org.get('website_url'))
+    except Exception as e: print(f"Error Apollo: {e}")
 
-# --- 5. MOTOR 2: GOOGLE MAPS + HUNTER (Volumen Físico) ---
-def raspar_google_y_hunter():
-    if not GOOGLE_MAPS_KEY or not HUNTER_KEY: return
-    print("🌍 Arrancando Motor 2: Maps + Hunter...")
-    
-    for ciudad in ciudades_españa:
-        query = f"transitario agente de aduanas en {ciudad}, España"
-        url_maps = f"https://maps.googleapis.com/maps/api/place/textsearch/json?query={query}&key={GOOGLE_MAPS_KEY}"
-        
-        try:
-            res_maps = requests.get(url_maps).json()
-            for lugar in res_maps.get('results', []):
-                nombre = lugar.get('name')
-                place_id = lugar.get('place_id')
-                
-                # Saca la web y teléfono del mapa
-                detalles = requests.get(f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=website,formatted_phone_number&key={GOOGLE_MAPS_KEY}").json().get('result', {})
-                web = detalles.get('website')
-                telefono = detalles.get('formatted_phone_number')
-                
-                if web:
-                    dominio = web.split('//')[-1].split('/')[0].replace('www.', '')
-                    # Le da el dominio a Hunter para sacar correos
-                    url_hunter = f"https://api.hunter.io/v2/domain-search?domain={dominio}&api_key={HUNTER_KEY}"
-                    correos = requests.get(url_hunter).json().get('data', {}).get('emails', [])
-                    
-                    if correos:
-                        for c in correos:
-                            guardar_prospecto(nombre, c.get('value'), f"Hunter ({ciudad})", c.get('position', 'Staff'), telefono, web)
-                    else:
-                        # MOTOR 3 (Rescate): Rascador web a fuerza bruta
-                        try:
-                            html = requests.get(web, headers=headers_navegador, timeout=5).text
-                            emails_html = set(re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+", html))
-                            for e in emails_html:
-                                guardar_prospecto(nombre, e, f"Web Scraper ({ciudad})", "Web Extracted", telefono, web)
-                        except:
-                            pass
-        except Exception as e:
-            print(f"Error Maps en {ciudad}: {e}")
+# --- 6. MOTOR 2: SERPAPI (API - Google Maps) ---
+def motor_serpapi(ciudad):
+    if not SERPAPI_KEY: return
+    print(f"🌍 Arrancando Motor 2 (Maps) para {ciudad}...")
+    try:
+        res = requests.get(f"https://serpapi.com/search.json?engine=google_maps&q=transitario agente aduanas {ciudad} España&api_key={SERPAPI_KEY}").json()
+        for lugar in res.get('local_results', []):
+            web = lugar.get('website')
+            if web:
+                dominio = web.split('//')[-1].split('/')[0].replace('www.', '')
+                buscar_correos_por_web(dominio, lugar.get('title'), f"Maps {ciudad}", lugar.get('phone'), web)
+    except: pass
 
-# --- ARRANQUE GENERAL ---
-print("⚙️ MÁQUINA B2B CONTEXTUAL INICIADA ⚙️")
-raspar_apollo()
-raspar_google_y_hunter()
-print("🏁 Extracción finalizada.")
+# --- 7. MOTOR 3: DUCKDUCKGO (Sin API - Alternativa Libre) ---
+def motor_duckduckgo(ciudad):
+    print(f"🦆 Arrancando Motor 3 (DuckDuckGo) para {ciudad}...")
+    try:
+        resultados = DDGS().text(f"transitario logistica aduanas {ciudad} España sitio oficial", max_results=5)
+        for r in resultados:
+            web = r.get('href', '')
+            if web and 'linkedin' not in web and 'facebook' not in web:
+                dominio = web.split('//')[-1].split('/')[0].replace('www.', '')
+                buscar_correos_por_web(dominio, r.get('title', 'Empresa DDG'), f"DDG {ciudad}", web_full=web)
+    except: pass
+
+# --- 8. MOTOR 4: GOOGLE DORKING (Sin API - Fuerza Bruta) ---
+def motor_google_dorking(ciudad):
+    print(f"🔍 Arrancando Motor 4 (Google Dorking) para {ciudad}...")
+    try:
+        query = f'inurl:contacto "transitario" OR "aduanas" {ciudad}'
+        for web in search(query, num_results=3, sleep_interval=3):
+            if 'paginasamarillas' in web or 'linkedin' in web: continue
+            dominio = web.split('//')[-1].split('/')[0].replace('www.', '')
+            buscar_correos_por_web(dominio, "Empresa Búsqueda", f"Google Dorking {ciudad}", web_full=web)
+    except: pass
+
+# --- EJECUCIÓN MAESTRA ---
+print("⚙️ MEGA-MÁQUINA B2B INICIADA (API + MÚLTIPLES MOTORES LIBRES) ⚙️")
+motor_apollo()
+for ciudad in ciudades:
+    motor_serpapi(ciudad)
+    motor_duckduckgo(ciudad)
+    motor_google_dorking(ciudad)
+    time.sleep(2) # Pausa técnica para no saturar los motores gratuitos
+
+print("🏁 Ejecución diaria finalizada. Todos los frentes cubiertos.")
