@@ -2,10 +2,14 @@ import os
 import time
 import requests
 import re
+import warnings
 from bs4 import BeautifulSoup
 from googlesearch import search
 from duckduckgo_search import DDGS
 from supabase import create_client, Client
+
+# --- APAGAR AVISOS MOLESTOS DE LA CONSOLA ---
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # --- 1. CONEXIONES Y LLAVES ---
 url_db = os.environ.get("SUPABASE_URL")
@@ -19,36 +23,42 @@ SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 ciudades = ["Barcelona", "Madrid", "Valencia", "Algeciras", "Bilbao", "Vigo", "Zaragoza"]
 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-# --- 2. INTELIGENCIA (Lector de Contexto) ---
+# --- 2. INTELIGENCIA (Lector de Contexto Ultrarrápido) ---
 def extraer_contexto(url):
     if not url or url == "null": return "Sin información"
     if not url.startswith('http'): url = 'https://' + url
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        # Timeout de 3 segundos. Si la web es lenta, la ignoramos para no perder 12 minutos.
+        res = requests.get(url, headers=headers, timeout=3)
         soup = BeautifulSoup(res.text, 'html.parser')
         for s in soup(["script", "style"]): s.extract()
         return soup.get_text(separator=' ', strip=True)[:500]
     except:
         return "No se pudo leer la web"
 
-# --- 3. ALMACÉN ---
+# --- 3. ALMACÉN (Con chivato de errores) ---
 def guardar(empresa, email, origen, cargo="Desconocido", tel=None, web=None):
     if not supabase or not email or "null" in email.lower(): return
     if any(ext in email.lower() for ext in ['.png', '.jpg', 'wix', 'example', 'sentry']): return
     
+    email_limpio = email.lower().strip()
+    
     try:
         supabase.table("prospectos").insert({
             "empresa": empresa,
-            "email": email.lower(),
+            "email": email_limpio,
             "origen": origen,
             "estado": "PENDIENTE",
             "cargo_contacto": cargo,
             "telefono": tel,
             "contexto_empresa": extraer_contexto(web)
         }).execute()
-        print(f"✅ [CAZADO] {empresa} | {email.lower()} | Vía: {origen}")
-    except:
-        pass # Ignora duplicados automáticamente
+        print(f"✅ [CAZADO] {empresa} | {email_limpio} | Vía: {origen}")
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Si el error es porque el email ya existe, nos callamos. Si es otro error, lo gritamos.
+        if "duplicate" not in error_msg and "unique" not in error_msg:
+            print(f"❌ Error en Supabase al guardar {email_limpio}: {e}")
 
 # --- 4. MOTOR DE CORREOS (Hunter + Scraper) ---
 def buscar_correos_por_web(dominio, nombre_empresa, origen_base, tel=None, web_full=None):
@@ -56,16 +66,16 @@ def buscar_correos_por_web(dominio, nombre_empresa, origen_base, tel=None, web_f
     if HUNTER_KEY:
         try:
             url_h = f"https://api.hunter.io/v2/domain-search?domain={dominio}&api_key={HUNTER_KEY}"
-            correos = requests.get(url_h).json().get('data', {}).get('emails', [])
+            correos = requests.get(url_h, timeout=3).json().get('data', {}).get('emails', [])
             for c in correos:
                 guardar(nombre_empresa, c.get('value'), f"Hunter ({origen_base})", c.get('position', 'Staff'), tel, web_full)
                 encontrado = True
         except: pass
     
-    # Si Hunter falla o no tiene datos, entra el Scraper a fuerza bruta
+    # Scraper a fuerza bruta si Hunter no sabe el correo
     if not encontrado and web_full:
         try:
-            html = requests.get(web_full, headers=headers, timeout=5).text
+            html = requests.get(web_full, headers=headers, timeout=3).text
             emails = set(re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+", html))
             for e in emails:
                 guardar(nombre_empresa, e, f"Web Scraper ({origen_base})", "Web Extracted", tel, web_full)
@@ -80,34 +90,44 @@ def motor_apollo():
         data = {
             "api_key": APOLLO_KEY,
             "q_keywords": "transitario aduanas freight forwarder",
-            "person_titles": ["Operations", "Operaciones", "CEO", "Director", "Aduanas"],
+            "person_titles": ["Operations", "Operaciones", "CEO", "Director", "Gerente", "Aduanas"],
             "person_locations": ["Spain"],
             "page": 1 
         }
-        req = requests.post(url, headers={"Content-Type": "application/json"}, json=data)
-        for p in req.json().get('people', []):
+        req = requests.post(url, headers={"Content-Type": "application/json"}, json=data, timeout=5)
+        resultados = req.json().get('people', [])
+        
+        if not resultados:
+            print("⚠️ Apollo ejecutado pero no devolvió resultados.")
+            
+        for p in resultados:
             org = p.get('organization', {})
             guardar(org.get('name', 'Empresa Desconocida'), p.get('email'), "Apollo", p.get('title', 'Cargo Desconocido'), web=org.get('website_url'))
-    except Exception as e: print(f"Error Apollo: {e}")
+    except Exception as e: print(f"❌ Error crítico en Apollo: {e}")
 
 # --- 6. MOTOR 2: SERPAPI (API - Google Maps) ---
 def motor_serpapi(ciudad):
     if not SERPAPI_KEY: return
     print(f"🌍 Arrancando Motor 2 (Maps) para {ciudad}...")
     try:
-        res = requests.get(f"https://serpapi.com/search.json?engine=google_maps&q=transitario agente aduanas {ciudad} España&api_key={SERPAPI_KEY}").json()
-        for lugar in res.get('local_results', []):
+        res = requests.get(f"https://serpapi.com/search.json?engine=google_maps&q=transitario agente aduanas {ciudad} España&api_key={SERPAPI_KEY}", timeout=5).json()
+        
+        locales = res.get('local_results', [])
+        if not locales:
+            print(f"⚠️ SerpApi ejecutado pero sin resultados para {ciudad}.")
+            
+        for lugar in locales:
             web = lugar.get('website')
             if web:
                 dominio = web.split('//')[-1].split('/')[0].replace('www.', '')
                 buscar_correos_por_web(dominio, lugar.get('title'), f"Maps {ciudad}", lugar.get('phone'), web)
-    except: pass
+    except Exception as e: print(f"❌ Error crítico en SerpApi: {e}")
 
-# --- 7. MOTOR 3: DUCKDUCKGO (Sin API - Alternativa Libre) ---
+# --- 7. MOTOR 3: DUCKDUCKGO (Fuerza Bruta Ligera) ---
 def motor_duckduckgo(ciudad):
     print(f"🦆 Arrancando Motor 3 (DuckDuckGo) para {ciudad}...")
     try:
-        resultados = DDGS().text(f"transitario logistica aduanas {ciudad} España sitio oficial", max_results=5)
+        resultados = DDGS().text(f"transitario logistica aduanas {ciudad} España sitio oficial", max_results=3)
         for r in resultados:
             web = r.get('href', '')
             if web and 'linkedin' not in web and 'facebook' not in web:
@@ -115,24 +135,24 @@ def motor_duckduckgo(ciudad):
                 buscar_correos_por_web(dominio, r.get('title', 'Empresa DDG'), f"DDG {ciudad}", web_full=web)
     except: pass
 
-# --- 8. MOTOR 4: GOOGLE DORKING (Sin API - Fuerza Bruta) ---
+# --- 8. MOTOR 4: GOOGLE DORKING (Rescate) ---
 def motor_google_dorking(ciudad):
     print(f"🔍 Arrancando Motor 4 (Google Dorking) para {ciudad}...")
     try:
         query = f'inurl:contacto "transitario" OR "aduanas" {ciudad}'
-        for web in search(query, num_results=3, sleep_interval=3):
+        # Bajamos el tiempo de espera entre búsquedas para ir a fondo
+        for web in search(query, num_results=2, sleep_interval=1):
             if 'paginasamarillas' in web or 'linkedin' in web: continue
             dominio = web.split('//')[-1].split('/')[0].replace('www.', '')
             buscar_correos_por_web(dominio, "Empresa Búsqueda", f"Google Dorking {ciudad}", web_full=web)
     except: pass
 
 # --- EJECUCIÓN MAESTRA ---
-print("⚙️ MEGA-MÁQUINA B2B INICIADA (API + MÚLTIPLES MOTORES LIBRES) ⚙️")
+print("⚙️ MEGA-MÁQUINA B2B INICIADA (MODO ALTA VELOCIDAD Y DEBUG) ⚙️")
 motor_apollo()
 for ciudad in ciudades:
     motor_serpapi(ciudad)
     motor_duckduckgo(ciudad)
     motor_google_dorking(ciudad)
-    time.sleep(2) # Pausa técnica para no saturar los motores gratuitos
 
-print("🏁 Ejecución diaria finalizada. Todos los frentes cubiertos.")
+print("🏁 Ejecución diaria finalizada. Revisar base de datos.")
