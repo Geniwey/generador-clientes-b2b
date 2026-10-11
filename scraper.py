@@ -1,64 +1,78 @@
 import os
-import re
-import time
 import requests
-from googlesearch import search
 from supabase import create_client, Client
 
-# Conecta con tu base de datos secreta
+# 1. Conexión a tu Base de Datos (Supabase)
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(url, key)
 
-# Búsquedas más específicas para encontrar directorios directos
-busquedas = [
-    "transitarios barcelona correo contacto",
-    "agentes de aduanas valencia email",
-    "empresas logistica internacional algeciras contacto"
-]
+# 2. Conexión al Cerebro B2B (Apollo.io)
+APOLLO_KEY = os.environ.get("APOLLO_KEY")
 
-patron_email = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+"
-headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+def arrancar_megamaquina():
+    if not APOLLO_KEY:
+        print("❌ Falla la API Key de Apollo. Ponla en los Secrets de GitHub.")
+        return
 
-for busqueda in busquedas:
-    print(f"🔍 Buscando en Google: {busqueda}")
+    print("🚀 Iniciando extracción B2B VIP en Apollo.io...")
+    
+    # Endpoint oficial de búsqueda de Apollo
+    api_url = "https://api.apollo.io/v1/mixed_people/search"
+    
+    headers = {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json"
+    }
+    
+    # El Filtro Francotirador: Qué queremos cazar exactamente
+    data = {
+        "api_key": APOLLO_KEY,
+        "q_keywords": "logistics transitario aduanas freight forwarder forwarding marítimo",
+        "person_titles": ["Operations", "Operaciones", "Logistics", "Logística", "CEO", "Director", "Gerente", "Aduanas", "Import", "Export", "Traffic"],
+        "person_locations": ["Spain", "España"],
+        "page": 1 # El robot empezará por la página 1. Más adelante podemos hacer que pase páginas automáticamente.
+    }
+
     try:
-        for url_web in search(busqueda, num_results=5, sleep_interval=5):
-            try:
-                # Evitamos redes sociales y directorios genéricos
-                if any(x in url_web for x in ['linkedin', 'facebook', 'instagram', 'paginasamarillas']):
-                    continue
-                    
-                print(f"Escanenado web: {url_web}")
-                # Entramos en la web haciéndonos pasar por un navegador normal
-                respuesta = requests.get(url_web, headers=headers, timeout=10)
-                emails_encontrados = set(re.findall(patron_email, respuesta.text))
+        response = requests.post(api_url, headers=headers, json=data)
+        
+        if response.status_code != 200:
+            print(f"⚠️ Error de conexión con Apollo: {response.text}")
+            return
+            
+        resultados = response.json().get('people', [])
+        
+        if not resultados:
+            print("No se han encontrado contactos nuevos en esta pasada.")
+            return
+
+        for persona in resultados:
+            email = persona.get('email')
+            empresa = persona.get('organization', {}).get('name', 'Empresa Desconocida')
+            cargo = persona.get('title', 'Cargo Desconocido')
+            nombre = persona.get('first_name', '')
+            
+            # Solo guardamos si Apollo nos da un email corporativo válido y real
+            if email and email != "null":
+                print(f"✅ ¡VIP CAZADO!: {nombre} ({cargo}) en {empresa} -> {email}")
                 
                 try:
-                    empresa_nombre = url_web.split('//')[1].split('/')[0].replace('www.', '')
-                except:
-                    empresa_nombre = "Empresa Desconocida"
-
-                for email in emails_encontrados:
-                    if any(ext in email.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', 'sentry', 'wix']):
-                        continue
-                        
-                    print(f"✅ ¡Cazado!: {email} en {empresa_nombre}")
+                    # Lo guardamos en tu Supabase listo para el futuro envío
+                    supabase.table("prospectos").insert({
+                        "empresa": empresa,
+                        "email": email.lower(),
+                        "origen": f"Apollo: {cargo}",
+                        "estado": "PENDIENTE"
+                    }).execute()
+                except Exception as e:
+                    # Si ya está en la base de datos, lo ignoramos para no duplicar
+                    pass
                     
-                    try:
-                        supabase.table("prospectos").insert({
-                            "empresa": empresa_nombre,
-                            "email": email.lower(),
-                            "origen": "GitHub Auto-Scraper",
-                            "estado": "PENDIENTE"
-                        }).execute()
-                    except Exception as e:
-                        print(f"⚠️ Email ya existe o error en BD: {email}")
-            except Exception as e:
-                print(f"❌ No se pudo leer {url_web}")
-            
-            # Pausa para no ser bloqueados
-            time.sleep(2)
-            
+        print(f"🏁 Batida completada. Base de datos actualizada.")
+        
     except Exception as e:
-        print(f"Error en la búsqueda general: {e}")
+        print(f"❌ Error crítico en el motor: {e}")
+
+# Encendemos la máquina
+arrancar_megamaquina()
