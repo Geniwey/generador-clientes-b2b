@@ -2,9 +2,8 @@ name: Minero de Clientes LogiQuote
 
 on:
   schedule:
-    # Se ejecuta solo cada madrugada a las 02:00 AM (UTC)
     - cron: '0 2 * * *'
-  workflow_dispatch: # Te pone un botón manual en GitHub por si quieres forzar la máquina ahora mismo
+  workflow_dispatch:
 
 jobs:
   scrape:
@@ -22,7 +21,10 @@ jobs:
         run: pip install -r requirements.txt
         
       - name: Arrancar Extracción
-        env:
+        env: # AQUÍ ESTÁ LA MAGIA: Le pasamos todas tus llaves secretas a Python
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          APOLLO_KEY: ${{ secrets.APOLLO_KEY }}
+          HUNTER_KEY: ${{ secrets.HUNTER_KEY }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python scraper.py
