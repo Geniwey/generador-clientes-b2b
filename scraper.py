@@ -10,7 +10,7 @@ url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(url, key)
 
-# El radar: Qué vamos a buscar en Google (puedes añadir más ciudades o países luego)
+# El radar: Qué vamos a buscar en Google
 busquedas = [
     "transitarios barcelona",
     "agentes de aduanas valencia",
@@ -23,8 +23,8 @@ patron_email = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+"
 for busqueda in busquedas:
     print(f"🔍 Buscando en Google: {busqueda}")
     try:
-        # Rastrea los 10 primeros resultados de cada búsqueda
-        for url_web in search(busqueda, num=10, stop=10, pause=2):
+        # CORRECCIÓN: Usamos num_results=10 y sleep_interval=2 para la nueva versión
+        for url_web in search(busqueda, num_results=10, sleep_interval=2):
             try:
                 print(f"Escanenado web: {url_web}")
                 respuesta = requests.get(url_web, timeout=5)
@@ -49,7 +49,7 @@ for busqueda in busquedas:
                             "estado": "PENDIENTE"
                         }).execute()
                     except:
-                        # Si da error es porque ese email ya está en la base de datos (evitamos repetidos)
+                        # Si da error es porque ese email ya está en la base de datos
                         pass
             except:
                 continue
