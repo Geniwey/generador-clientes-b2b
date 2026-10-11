@@ -1,12 +1,10 @@
-name: Minero de Clientes LogiQuote
+name: Máquina de Marketing LogiQuote
 
 on:
-  schedule:
-    - cron: '0 2 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # MODO 100% MANUAL: Solo arranca si tú pulsas el botón
 
 jobs:
-  scrape:
+  scrape_and_write:
     runs-on: ubuntu-latest
     steps:
       - name: Clonar código
@@ -20,7 +18,7 @@ jobs:
       - name: Instalar motores
         run: pip install -r requirements.txt
         
-      - name: Arrancar Extracción
+      - name: 1. Arrancar Extracción (Buscando clientes)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -29,9 +27,9 @@ jobs:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python scraper.py
 
-      - name: Ejemplo Mail (IA Redactando)
+      - name: 2. Cerebro IA (Redactando y Guardando)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GROQ_KEY: ${{ secrets.GROQ_KEY }}
-        run: python test_ia.py
+        run: python redactor.py
