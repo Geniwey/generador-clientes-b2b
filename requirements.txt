@@ -2,4 +2,4 @@ supabase
 requests
 beautifulsoup4
 googlesearch-python
-duckduckgo-search
+ddgs
