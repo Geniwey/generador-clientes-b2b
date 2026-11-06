@@ -1,23 +1,23 @@
 name: Máquina de Marketing LogiQuote
 
 on:
-  workflow_dispatch: # MODO 100% MANUAL: Solo arranca si tú pulsas el botón
+  workflow_dispatch: # MODO 100% MANUAL: No se ejecuta sola, solo cuando pulsas "Run workflow"
 
 jobs:
   scrape_and_write:
     runs-on: ubuntu-latest
     steps:
       - name: Clonar código
-        uses: actions/checkout@v3
-        
+        uses: actions/checkout@v4
+
       - name: Preparar Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-          
+          python-version: '3.11'
+
       - name: Instalar motores
         run: pip install -r requirements.txt
-        
+
       - name: 1. Arrancar Extracción (Buscando clientes)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -27,7 +27,7 @@ jobs:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python scraper.py
 
-      - name: 2. Cerebro IA (Redactando y Guardando)
+      - name: 2. Cerebro IA (Redactando y Guardando en Supabase)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
