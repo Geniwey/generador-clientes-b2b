@@ -33,6 +33,10 @@ EXTENSIONES_BASURA = [
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".css", ".js", ".pdf", ".woff", ".ttf"
 ]
 
+PALABRAS_BASURA_EMAIL = [
+    "download", "pdf", "test", "bot", "noreply", "no-reply", "sentry", "daemon", "mailer", "example"
+]
+
 def dominio_limpio(url):
     if not url:
         return ""
@@ -56,10 +60,26 @@ def es_email_valido(email):
     e = email.lower().strip()
     if len(e) < 6 or len(e) > 90 or "@" not in e:
         return False
+    
+    # 1. Filtro de extensiones y dominios
     if any(ext in e for ext in EXTENSIONES_BASURA):
         return False
     if any(prohibido in e for prohibido in DOMINIOS_PROHIBIDOS):
         return False
+    
+    # 2. Filtro anti-basura (pdf-lib, downloadjs, etc)
+    if any(basura in e for basura in PALABRAS_BASURA_EMAIL):
+        return False
+        
+    partes = e.split('@')
+    if len(partes) != 2: 
+        return False
+    local_part = partes[0]
+
+    # 3. Filtro de números raros (bloquea cosas como 20peru@ o 1234@)
+    if re.match(r"^\d{2,}", local_part):
+        return False
+        
     if re.match(r"^[0-9a-f]{16,}@", e):
         return False
     return True
@@ -164,9 +184,6 @@ def motor_apollo():
         }
         req = requests.post(url, headers={"Content-Type": "application/json"}, json=data, timeout=6)
         resultados = req.json().get('people', [])
-
-        if not resultados:
-            print("⚠️ Apollo ejecutado pero no devolvió resultados.")
 
         for p in resultados:
             org = p.get('organization', {})
