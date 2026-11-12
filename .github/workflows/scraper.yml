@@ -1,7 +1,10 @@
 name: Máquina de Marketing LogiQuote
 
 on:
-  workflow_dispatch: # MODO 100% MANUAL: No se ejecuta sola, solo cuando pulsas "Run workflow"
+  workflow_dispatch: # MODO MANUAL: Mantiene el botón por si quieres forzarlo
+  schedule:
+    # MODO AUTOMÁTICO: Se enciende sola cada LUNES a las 02:00 de la madrugada
+    - cron: '0 2 * * 1'
 
 jobs:
   scrape_and_write:
