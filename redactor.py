@@ -10,6 +10,8 @@ groq_key = (os.environ.get("GROQ_KEY") or "").strip()
 
 supabase: Client = create_client(url_db, key_db) if url_db and key_db else None
 
+MAX_NUEVOS_POR_EJECUCION = 70
+
 def detectar_modelos_groq():
     respaldo = [
         "openai/gpt-oss-20b",
@@ -51,10 +53,8 @@ print(f"🤖 Modelos Groq detectados para redacción: {MODELOS_DISPONIBLES}")
 def limpiar_respuesta_ia(texto):
     if not texto:
         return ""
-    # Elimina posibles bloques internos de razonamiento <think>...</think>
     limpio = re.sub(r"<think>.*?</think>", "", texto, flags=re.DOTALL)
     limpio = limpio.replace('"', "").replace("«", "").replace("»", "").strip()
-    # Si devuelve varias líneas, nos quedamos con la primera frase útil
     lineas = [l.strip() for l in limpio.splitlines() if l.strip()]
     return lineas[0] if lineas else ""
 
@@ -104,8 +104,7 @@ try:
         print("❌ Faltan credenciales de Supabase.")
         exit(1)
 
-    # Busca clientes pendientes
-    res = supabase.table("prospectos").select("*").eq("estado", "PENDIENTE").limit(50).execute()
+    res = supabase.table("prospectos").select("*").eq("estado", "PENDIENTE").limit(200).execute()
     clientes = res.data or []
 
     if not clientes:
@@ -113,9 +112,11 @@ try:
 
     procesados = 0
     for c in clientes:
-        # Si ya tiene algo guardado en cuerpo_email, es que ya tiene su frase hecha. Lo saltamos.
         if c.get('cuerpo_email'):
             continue
+
+        if procesados >= MAX_NUEVOS_POR_EJECUCION:
+            break
 
         print(f"\n✍️ Pensando rompehielos para: {c['empresa']}")
         rompehielos = redactar_rompehielos(c['empresa'], c.get('contexto_empresa', ''))
@@ -124,13 +125,11 @@ try:
             print("  [!] Fallo en la IA. Saltando al siguiente.")
             continue
 
-        # Lo guardamos en la columna cuerpo_email pero MANTENEMOS el estado en PENDIENTE
-        # para que Google Apps Script pueda encontrarlo mañana.
         supabase.table("prospectos").update({
             "cuerpo_email": rompehielos
         }).eq("id", c['id']).execute()
         procesados += 1
-        print(f"  ✅ Frase lista y guardada: {rompehielos}")
+        print(f"  ✅ Frase lista y guardada ({procesados}/{MAX_NUEVOS_POR_EJECUCION}): {rompehielos}")
         time.sleep(1.5)
 
     print(f"\n📊 Total rompehielos generados hoy: {procesados}")
