@@ -10,7 +10,7 @@ groq_key = (os.environ.get("GROQ_KEY") or "").strip()
 
 supabase: Client = create_client(url_db, key_db) if url_db and key_db else None
 
-MAX_NUEVOS_POR_EJECUCION = 70
+MAX_NUEVOS_POR_EJECUCION = 180
 
 def detectar_modelos_groq():
     respaldo = [
@@ -104,7 +104,7 @@ try:
         print("❌ Faltan credenciales de Supabase.")
         exit(1)
 
-    res = supabase.table("prospectos").select("*").eq("estado", "PENDIENTE").limit(200).execute()
+    res = supabase.table("prospectos").select("*").eq("estado", "PENDIENTE").limit(350).execute()
     clientes = res.data or []
 
     if not clientes:
